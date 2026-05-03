@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lero-Lero & Nhenhenhe - and e lelet</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-content">
+        <p class="eyebrow">and + lelet escolhendo no puro nhenhenhe</p>
+        <h1>Lero-Lero & Nhenhenhe</h1>
+        <p>A lista oficialmente nao oficial das coisas que talvez virem play depois de muito lero-lero.</p>
+      </div>
+      <div class="add-context"><span>Quem escolheu?</span><div class="user-selector" aria-label="Selecionar quem esta adicionando">
+        <label>
+          <input type="radio" name="added_by" value="and" checked> and
+        </label>
+        <label>
+          <input type="radio" name="added_by" value="lelet"> lelet
+        </label>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="search-section">
+        <div class="search-container">
+          <input id="search" type="text" class="search-input" placeholder="Buscar filmes, series e animes..." autocomplete="off">
+          <div id="results" class="results-container"></div>
+        </div>
+      </section>
+
+      <section class="raffle-section">
+        <button id="raffleBtn" class="raffle-button" onclick="sorteiaFilme()">Sortear o que assistir</button>
+        <div id="raffleResult" class="raffle-result" style="display: none;"></div>
+      </section>
+
+      <div class="lists-grid">
+        <section class="list-section">
+          <div class="section-header">
+            <h2>Para assistir</h2>
+            <span class="count" id="list-count">0</span>
+          </div>
+          <div id="list" class="items-container"></div>
+          <div class="empty-state" id="list-empty">
+            <p>Ainda nao tem lero-lero nenhum aqui. Joguem um titulo pra dentro.</p>
+          </div>
+        </section>
+
+        <section class="list-section watched-section">
+          <div class="section-header">
+            <h2>Ja assistidos</h2>
+            <span class="count" id="watched-count">0</span>
+          </div>
+          <div id="watched" class="items-container"></div>
+          <div class="empty-state" id="watched-empty">
+            <p>O que ja virou sessao fica guardado aqui.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <p>Lero-Lero & Nhenhenhe: menos scroll infinito, mais play.</p>
+    </footer>
+  </div>
+
+  <div id="modalDetail" class="modal" aria-hidden="true">
+    <div class="modal-content">
+      <button class="modal-close" type="button" aria-label="Fechar">&times;</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
