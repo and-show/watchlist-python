@@ -195,6 +195,11 @@ async function toggleWatchedFromModal() {
 
 async function loadLists() {
   try {
+    if (!currentList.length && !currentWatched.length) {
+      listDiv.innerHTML = renderSkeletonCards();
+      watchedDiv.innerHTML = renderSkeletonCards();
+    }
+
     const [list, watched] = await Promise.all([
       apiFetch("/list"),
       apiFetch("/watched"),
@@ -220,6 +225,18 @@ async function loadLists() {
 }
 
 // FIX: recebe índice; onclick usa getItem() em vez de payload serializado
+function renderSkeletonCards(count = 6) {
+  return Array.from({ length: count }, () => `
+    <article class="item-card skeleton-card" aria-hidden="true">
+      <div class="skeleton-poster"></div>
+      <div class="skeleton-overlay">
+        <span></span>
+        <span></span>
+      </div>
+    </article>
+  `).join("");
+}
+
 function renderItem(item, index, isWatched) {
   const imageUrl  = item.poster || fallbackPoster(150, 220);
   const dateInfo  = isWatched
