@@ -8,3 +8,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: FIREBASE_CREDENTIALS
+        sync: false   # preencha o valor no dashboard do Render → Environment

@@ -3,7 +3,7 @@ import requests
 API_KEY = "2f42b1038510ec938b171e1b2b909627"
 
 
-def search_movies(query):
+def search_movies(query: str) -> list[dict]:
     url = "https://api.themoviedb.org/3/search/multi"
     params = {"api_key": API_KEY, "query": query, "language": "pt-BR"}
 
@@ -23,10 +23,19 @@ def search_movies(query):
             continue
 
         poster_path = item.get("poster_path")
+
+        # FIX: type agora é capitalizado e consistente com o resto do sistema
+        item_type = "Filme" if media_type == "movie" else "Série"
+
+        # FIX: salva year para exibir no front
+        raw_date = item.get("release_date") or item.get("first_air_date") or ""
+        year = raw_date[:4] if raw_date else ""
+
         results.append({
             "title": title,
             "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "",
-            "type": "filme" if media_type == "movie" else "serie",
+            "type": item_type,
+            "year": year,
         })
 
     return results

@@ -1,50 +1,41 @@
-const searchInput = document.getElementById("search");
-const resultsDiv = document.getElementById("results");
-const listDiv = document.getElementById("list");
-const watchedDiv = document.getElementById("watched");
-const listCount = document.getElementById("list-count");
+/* ═══════════════════════════════════════════════════════════════
+   app.js — Lero-Lero & Nhenhenhe
+   Fixes aplicados:
+   - addedBy() vira função (lê radio em tempo real)
+   - toggleWatched usa /watch e /unwatch em vez de /update
+   - itemPayload removido; itens acessados por índice no array
+   - polling aumentado para 30s
+   - tipos consistentes com o backend (Filme / Série / Anime)
+═══════════════════════════════════════════════════════════════ */
+
+// ── DOM REFS ──────────────────────────────────────────────────
+const searchInput  = document.getElementById("search");
+const resultsDiv   = document.getElementById("results");
+const listDiv      = document.getElementById("list");
+const watchedDiv   = document.getElementById("watched");
+const listCount    = document.getElementById("list-count");
 const watchedCount = document.getElementById("watched-count");
-const listEmpty = document.getElementById("list-empty");
+const listEmpty    = document.getElementById("list-empty");
 const watchedEmpty = document.getElementById("watched-empty");
 const raffleResult = document.getElementById("raffleResult");
-const modal = document.getElementById("modalDetail");
-const modalBody = document.getElementById("modalBody");
-const modalClose = document.querySelector(".modal-close");
-const personRadios = document.querySelectorAll("input[name='added_by']");
+const modal        = document.getElementById("modalDetail");
+const modalBody    = document.getElementById("modalBody");
+const modalClose   = document.querySelector(".modal-close");
 
-const people = {
-  and: "and",
-  lelet: "lelet",
-};
-
-let currentList = [];
+// ── STATE ─────────────────────────────────────────────────────
+let currentList    = [];
 let currentWatched = [];
-let addedBy = "and";
-let searchTimeout;
-let currentDetailItem = null;
+let currentDetail  = null;   // item aberto no modal
+let searchTimeout  = null;
 
-personRadios.forEach((radio) => {
-  radio.addEventListener("change", (event) => {
-    addedBy = event.target.value;
-  });
-});
+// ── HELPERS ───────────────────────────────────────────────────
 
-modalClose.addEventListener("click", () => modal.classList.remove("open"));
-modal.addEventListener("click", (event) => {
-  if (event.target === modal) modal.classList.remove("open");
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    modal.classList.remove("open");
-    searchInput.value = "";
-    resultsDiv.innerHTML = "";
-  }
-});
-
-function fallbackPoster(width = 150, height = 220) {
-  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}'%3E%3Crect fill='%231e293b' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='14' fill='%2394a3b8' text-anchor='middle' dy='.3em'%3ESem imagem%3C/text%3E%3C/svg%3E`;
+// FIX: lê o radio em tempo real em vez de usar variável stale
+function addedBy() {
+  return document.querySelector("input[name='added_by']:checked")?.value ?? "and";
 }
+
+const PEOPLE = { and: "and", lelet: "lelet" };
 
 function escapeHtml(value = "") {
   return String(value)
@@ -55,40 +46,30 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
-function itemPayload(item) {
-  return encodeURIComponent(JSON.stringify(item)).replaceAll("'", "%27");
-}
-
-function itemFromPayload(payload) {
-  return JSON.parse(decodeURIComponent(payload));
+function fallbackPoster(w = 150, h = 220) {
+  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'%3E%3Crect fill='%231e293b' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='14' fill='%2394a3b8' text-anchor='middle' dy='.3em'%3ESem imagem%3C/text%3E%3C/svg%3E`;
 }
 
 function formatDate(value) {
   if (!value) return "Data desconhecida";
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Data desconhecida";
-
   return date.toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
   });
 }
 
 function renderStars(rating = 0, interactive = false) {
-  return Array.from({ length: 5 }, (_, index) => {
-    const value = index + 1;
+  return Array.from({ length: 5 }, (_, i) => {
+    const value      = i + 1;
     const activeClass = value <= rating ? "active" : "";
-    const label = `${value} estrela${value > 1 ? "s" : ""}`;
-
     if (!interactive) {
       return `<span class="star ${activeClass}" aria-hidden="true">&#9733;</span>`;
     }
-
-    return `<button class="star ${activeClass}" type="button" onclick="setRating(${value})" aria-label="Avaliar com ${label}">&#9733;</button>`;
+    return `<button class="star ${activeClass}" type="button"
+      onclick="setRating(${value})"
+      aria-label="Avaliar com ${value} estrela${value > 1 ? "s" : ""}">&#9733;</button>`;
   }).join("");
 }
 
@@ -96,76 +77,39 @@ function renderRatingText(rating) {
   return rating ? `${rating}/5` : "Sem nota";
 }
 
-function renderDateInfo(item) {
-  if (item.watched) {
-    return {
-      label: "Assistido em",
-      value: formatDate(item.watched_at),
-    };
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  // FastAPI retorna detail no corpo em erros HTTP
+  const data = await res.json().catch(() => ({}));
+  return data;
+}
+
+// ── MODAL ─────────────────────────────────────────────────────
+
+modalClose.addEventListener("click", closeModal);
+modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeModal();
+    searchInput.value = "";
+    resultsDiv.innerHTML = "";
   }
+});
 
-  return {
-    label: `Escolhido por ${people[item.added_by] || "Alguem"}`,
-    value: formatDate(item.added_at),
-  };
-}
-
-function renderItem(item) {
-  const imageUrl = item.poster || fallbackPoster(150, 220);
-  const dateInfo = renderDateInfo(item);
-
-  return `
-    <article class="item-card" title="${escapeHtml(item.title)}" onclick="openItemDetailFromPayload('${itemPayload(item)}')">
-      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy">
-      <div class="overlay">
-        <div class="item-title">${escapeHtml(item.title)}</div>
-        <div class="couple-status">
-          <span>${escapeHtml(dateInfo.label)}</span>
-          <span>${escapeHtml(dateInfo.value)}</span>
-          <span class="mini-rating"><span class="mini-stars">${renderStars(item.rating || 0)}</span><span class="rating-label">${escapeHtml(renderRatingText(item.rating))}</span></span>
-        </div>
-        <div class="item-actions">
-          <button class="item-btn watch-btn" onclick="event.stopPropagation(); toggleWatchedFromPayload('${itemPayload(item)}')">
-            ${item.watched ? "Voltar" : "Marcar assistido"}
-          </button>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-function renderSearchResult(item) {
-  const imageUrl = item.poster || fallbackPoster(150, 220);
-
-  return `
-    <article class="item-card" onclick="addToListFromPayload('${itemPayload(item)}')" title="Adicionar: ${escapeHtml(item.title)}">
-      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy">
-      <div class="overlay">
-        <div class="item-title">${escapeHtml(item.title)}</div>
-        <div class="item-actions">
-          <button class="item-btn add-btn">+ Adicionar</button>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-function openItemDetailFromPayload(payload) {
-  openItemDetail(itemFromPayload(payload));
-}
-
-function toggleWatchedFromPayload(payload) {
-  toggleWatched(itemFromPayload(payload));
-}
-
-function addToListFromPayload(payload) {
-  addToList(itemFromPayload(payload));
+function closeModal() {
+  modal.classList.remove("open");
+  currentDetail = null;
 }
 
 function openItemDetail(item) {
-  currentDetailItem = item;
-  const addedByLabel = people[item.added_by] || "Alguem";
-  const dateInfo = renderDateInfo(item);
+  currentDetail = item;
+  const addedByLabel = PEOPLE[item.added_by] || "Alguém";
+  const dateInfo = item.watched
+    ? { label: "Assistido em", value: formatDate(item.watched_at) }
+    : { label: `Escolhido por ${addedByLabel}`, value: formatDate(item.added_at) };
 
   modalBody.innerHTML = `
     <div class="detail-header">
@@ -186,8 +130,8 @@ function openItemDetail(item) {
     </section>
 
     <section class="detail-section rating-panel">
-      <h3>Avaliacao do lero-lero</h3>
-      <div class="stars" role="group" aria-label="Avaliacao em estrelas">
+      <h3>Avaliação do lero-lero</h3>
+      <div class="stars" role="group" aria-label="Avaliação em estrelas">
         ${renderStars(item.rating || 0, true)}
       </div>
       <p>${escapeHtml(renderRatingText(item.rating))}</p>
@@ -204,112 +148,193 @@ function openItemDetail(item) {
   modal.classList.add("open");
 }
 
+// ── RATING ────────────────────────────────────────────────────
+
 async function setRating(rating) {
-  await updateItem({ rating });
-  showNotification(`Nota salva: ${rating}/5`);
-}
-
-async function updateItem(changes, refreshModal = true) {
-  const response = await fetch("/update", {
+  if (!currentDetail) return;
+  const data = await apiFetch("/update", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: currentDetailItem.title,
-      ...changes,
-    }),
+    body: JSON.stringify({ title: currentDetail.title, rating }),
   });
-
-  const data = await response.json();
   if (data.status !== "ok") {
-    showNotification(data.message || "Nao foi possivel atualizar");
+    showNotification(data.detail?.message || data.message || "Não foi possível salvar nota");
     return;
   }
-
-  currentDetailItem = data.item;
+  showNotification(`Nota salva: ${rating}/5`);
+  currentDetail = data.item;
   await loadLists();
-  if (refreshModal && modal.classList.contains("open")) openItemDetail(data.item);
+  if (modal.classList.contains("open")) openItemDetail(currentDetail);
 }
 
+// ── WATCH / UNWATCH ───────────────────────────────────────────
+// FIX: usa /watch e /unwatch em vez de /update com watched:bool
+// Isso garante que o item seja movido entre coleções no Firestore.
+
 async function toggleWatched(item) {
-  currentDetailItem = item;
-  const nextValue = !Boolean(item.watched);
-  await updateItem({ watched: nextValue }, false);
-  showNotification(nextValue ? "Marcado como assistido" : "Voltou para a lista");
+  const endpoint = item.watched ? "/unwatch" : "/watch";
+  const data = await apiFetch(endpoint, {
+    method: "POST",
+    body: JSON.stringify({ title: item.title }),
+  });
+  if (data.status !== "ok") {
+    showNotification(data.detail?.message || data.message || "Erro ao atualizar status");
+    return;
+  }
+  showNotification(item.watched ? "Voltou para a lista" : "Marcado como assistido");
+  await loadLists();
+  return data.item;
 }
 
 async function toggleWatchedFromModal() {
-  await toggleWatched(currentDetailItem);
-  if (currentDetailItem) openItemDetail(currentDetailItem);
+  if (!currentDetail) return;
+  const updated = await toggleWatched(currentDetail);
+  if (updated && modal.classList.contains("open")) openItemDetail(updated);
 }
 
-async function addToList(item) {
-  const exists = [...currentList, ...currentWatched].some((movie) => movie.title === item.title);
-  if (exists) {
-    showNotification("Ja esta na lista");
-    return;
-  }
-
-  const response = await fetch("/add", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...item, added_by: addedBy }),
-  });
-
-  const data = await response.json();
-  if (data.status === "ok") {
-    showNotification("Entrou no Lero-Lero & Nhenhenhe");
-    searchInput.value = "";
-    resultsDiv.innerHTML = "";
-    await loadLists();
-    return;
-  }
-
-  showNotification(data.message || "Erro ao adicionar");
-}
-
-async function deleteItemConfirm() {
-  if (!confirm("Tem certeza que deseja remover este item?")) return;
-
-  await fetch("/delete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: currentDetailItem.title }),
-  });
-
-  showNotification("Item removido");
-  modal.classList.remove("open");
-  await loadLists();
-}
+// ── LISTS ─────────────────────────────────────────────────────
 
 async function loadLists() {
   try {
     const [list, watched] = await Promise.all([
-      fetch("/list").then((response) => response.json()),
-      fetch("/watched").then((response) => response.json()),
+      apiFetch("/list"),
+      apiFetch("/watched"),
     ]);
 
-    currentList = list;
-    currentWatched = watched;
-    listCount.textContent = list.length;
-    watchedCount.textContent = watched.length;
+    // apiFetch retorna o array direto nesses endpoints
+    currentList    = Array.isArray(list)    ? list    : [];
+    currentWatched = Array.isArray(watched) ? watched : [];
 
-    listEmpty.style.display = list.length ? "none" : "flex";
-    watchedEmpty.style.display = watched.length ? "none" : "flex";
-    listDiv.innerHTML = list.map(renderItem).join("");
-    watchedDiv.innerHTML = watched.map(renderItem).join("");
+    listCount.textContent    = currentList.length;
+    watchedCount.textContent = currentWatched.length;
+
+    listEmpty.style.display    = currentList.length    ? "none" : "flex";
+    watchedEmpty.style.display = currentWatched.length ? "none" : "flex";
+
+    // FIX: passa índice ao card em vez de serializar o objeto inteiro
+    listDiv.innerHTML    = currentList.map((item, i) => renderItem(item, i, false)).join("");
+    watchedDiv.innerHTML = currentWatched.map((item, i) => renderItem(item, i, true)).join("");
   } catch (error) {
     console.error("Erro ao carregar listas:", error);
     showNotification("Erro ao carregar listas");
   }
 }
 
+// FIX: recebe índice; onclick usa getItem() em vez de payload serializado
+function renderItem(item, index, isWatched) {
+  const imageUrl  = item.poster || fallbackPoster(150, 220);
+  const dateInfo  = isWatched
+    ? { label: "Assistido em",  value: formatDate(item.watched_at) }
+    : { label: `Por ${PEOPLE[item.added_by] || "alguém"}`, value: formatDate(item.added_at) };
+
+  return `
+    <article class="item-card" title="${escapeHtml(item.title)}"
+      onclick="openItemByIndex(${index}, ${isWatched})">
+      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy">
+      <div class="overlay">
+        <div class="item-title">${escapeHtml(item.title)}</div>
+        <div class="couple-status">
+          <span>${escapeHtml(dateInfo.label)}</span>
+          <span>${escapeHtml(dateInfo.value)}</span>
+          <span class="mini-rating">
+            <span class="mini-stars">${renderStars(item.rating || 0)}</span>
+            <span class="rating-label">${escapeHtml(renderRatingText(item.rating))}</span>
+          </span>
+        </div>
+        <div class="item-actions">
+          <button class="item-btn watch-btn"
+            onclick="event.stopPropagation(); toggleWatchedByIndex(${index}, ${isWatched})">
+            ${isWatched ? "Voltar" : "Marcar assistido"}
+          </button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+// FIX: acessa item pelo índice no array em memória — sem serialização frágil
+function openItemByIndex(index, isWatched) {
+  const item = isWatched ? currentWatched[index] : currentList[index];
+  if (item) openItemDetail(item);
+}
+
+async function toggleWatchedByIndex(index, isWatched) {
+  const item = isWatched ? currentWatched[index] : currentList[index];
+  if (item) await toggleWatched(item);
+}
+
+// ── SEARCH ────────────────────────────────────────────────────
+
+searchInput.addEventListener("input", (e) => {
+  const query = e.target.value.trim();
+  clearTimeout(searchTimeout);
+  if (!query) { resultsDiv.innerHTML = ""; return; }
+
+  resultsDiv.innerHTML = '<div class="search-message">Buscando...</div>';
+
+  searchTimeout = setTimeout(async () => {
+    try {
+      const data = await apiFetch(`/search?q=${encodeURIComponent(query)}`);
+      const items = Array.isArray(data) ? data : [];
+      resultsDiv.innerHTML = items.length
+        ? items.map((item, i) => renderSearchResult(item, i)).join("")
+        : '<div class="search-message">Nenhum resultado encontrado</div>';
+      resultsDiv._searchResults = items;
+    } catch {
+      resultsDiv.innerHTML = '<div class="search-message error">Erro ao buscar</div>';
+    }
+  }, 300);
+});
+
+function renderSearchResult(item, index) {
+  const imageUrl = item.poster || fallbackPoster(150, 220);
+  return `
+    <article class="item-card"
+      onclick="addToListByIndex(${index})"
+      title="Adicionar: ${escapeHtml(item.title)}">
+      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy">
+      <div class="overlay">
+        <div class="item-title">${escapeHtml(item.title)}</div>
+        <div class="item-actions">
+          <button class="item-btn add-btn">+ Adicionar</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+async function addToListByIndex(index) {
+  const item = resultsDiv._searchResults?.[index];
+  if (!item) return;
+
+  const alreadyIn = [...currentList, ...currentWatched]
+    .some((m) => m.title.toLowerCase() === item.title.toLowerCase());
+
+  if (alreadyIn) { showNotification("Já está na lista"); return; }
+
+  const data = await apiFetch("/add", {
+    method: "POST",
+    body: JSON.stringify({ ...item, added_by: addedBy() }),
+  });
+
+  if (data.status === "ok") {
+    showNotification("Entrou no Lero-Lero & Nhenhenhe!");
+    searchInput.value    = "";
+    resultsDiv.innerHTML = "";
+    await loadLists();
+  } else {
+    showNotification(data.detail?.message || data.message || "Erro ao adicionar");
+  }
+}
+
+// ── RAFFLE ────────────────────────────────────────────────────
+
 async function sorteiaFilme() {
   try {
-    const data = await fetch("/random").then((response) => response.json());
+    const data = await apiFetch("/random");
     raffleResult.style.display = "block";
 
     if (data.status !== "ok") {
-      raffleResult.innerHTML = `<h2>${escapeHtml(data.message || "Nada para sortear")}</h2>`;
+      raffleResult.innerHTML = `<h2>${escapeHtml(data.detail?.message || data.message || "Nada para sortear")}</h2>`;
       return;
     }
 
@@ -317,50 +342,52 @@ async function sorteiaFilme() {
     raffleResult.innerHTML = `
       <h2>Sorteado: ${escapeHtml(item.title)}</h2>
       <img src="${escapeHtml(item.poster || fallbackPoster(250, 350))}" alt="${escapeHtml(item.title)}">
-      <p>Foi escolhido por ${escapeHtml(people[item.added_by] || "alguem")} em ${escapeHtml(formatDate(item.added_at))}</p>
-      <button class="item-btn watch-btn raffle-open" onclick="openItemDetailFromPayload('${itemPayload(item)}')">Abrir detalhes</button>
+      <p>Escolhido por ${escapeHtml(PEOPLE[item.added_by] || "alguém")} em ${escapeHtml(formatDate(item.added_at))}</p>
+      <button class="item-btn watch-btn raffle-open" onclick="openRaffledItem()">Abrir detalhes</button>
     `;
-  } catch (error) {
-    console.error("Erro no sorteio:", error);
+    // guarda item sorteado para o botão "Abrir detalhes"
+    raffleResult._item = item;
+  } catch {
     showNotification("Erro ao sortear");
   }
 }
 
-searchInput.addEventListener("input", (event) => {
-  const query = event.target.value.trim();
-  clearTimeout(searchTimeout);
+function openRaffledItem() {
+  const item = raffleResult._item;
+  if (item) openItemDetail(item);
+}
 
-  if (!query) {
-    resultsDiv.innerHTML = "";
-    return;
-  }
+// ── DELETE ────────────────────────────────────────────────────
 
-  resultsDiv.innerHTML = '<div class="search-message">Buscando...</div>';
+async function deleteItemConfirm() {
+  if (!currentDetail) return;
+  if (!confirm(`Remover "${currentDetail.title}" da lista?`)) return;
 
-  searchTimeout = setTimeout(async () => {
-    try {
-      const data = await fetch(`/search?q=${encodeURIComponent(query)}`).then((response) => response.json());
-      resultsDiv.innerHTML = data.length
-        ? data.map(renderSearchResult).join("")
-        : '<div class="search-message">Nenhum resultado encontrado</div>';
-    } catch (error) {
-      console.error("Erro na busca:", error);
-      resultsDiv.innerHTML = '<div class="search-message error">Erro ao buscar</div>';
-    }
-  }, 300);
-});
+  await apiFetch("/delete", {
+    method: "POST",
+    body: JSON.stringify({ title: currentDetail.title }),
+  });
+
+  showNotification("Item removido");
+  closeModal();
+  await loadLists();
+}
+
+// ── NOTIFICATIONS ─────────────────────────────────────────────
 
 function showNotification(message) {
-  const notification = document.createElement("div");
-  notification.className = "notification";
-  notification.textContent = message;
-  document.body.appendChild(notification);
-
+  const el = document.createElement("div");
+  el.className  = "notification";
+  el.textContent = message;
+  document.body.appendChild(el);
   setTimeout(() => {
-    notification.classList.add("leaving");
-    setTimeout(() => notification.remove(), 250);
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 250);
   }, 2400);
 }
 
+// ── INIT ──────────────────────────────────────────────────────
+
 loadLists();
-setInterval(loadLists, 5000);
+// FIX: polling aumentado para 30s (era 5s — pesado para Firestore free tier)
+setInterval(loadLists, 30_000);
